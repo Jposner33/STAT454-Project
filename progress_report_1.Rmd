@@ -1,0 +1,144 @@
+---
+title: "Progress Report 1"
+author: "Lilith Appel, Jacob Posner, Mateo Useche"
+date: "2024-04-11"
+output: html_document
+---
+
+```{r}
+#Load packages
+library(bayesrules)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(usmap)
+library(sf)
+library(rnaturalearth)
+library(glmnet)
+library(rstan)
+library(rstanarm)
+```
+
+
+# Research Question
+
+Looking at patients who were diagnosed with breast cancer from 2015-2018, we want to study what parameters affected whether or not a breast cancer patient was diagnosed within 90 days of their first hospital visit. We also want to explore how accurate we can get with our predictions using a Bayesian lasso model. 
+
+# Data background
+
+We use a dataset from Health Verity (HV), which is a large healthcare-related ecosystem specifically for US data. The data were created by a Kaggle challenge where they joined multiple datasets including health predictors, demographics, socioeconomic status, and zip codes. In particular, this HV dataset has patient-level data for individuals who were diagnosed with metastatic triple-negative breast cancers. Additionally, the dataset was merged with environmental databases to include toxic air pollution and its effect on labor outcomes. 
+Moreover, we use a hospital dataset from all 50 US states and territories. We are hoping to eventually merge these two datasets so we can have all the demographic data and healthcare equity predictors and be able to analyze them with the spatial data from our second dataset. This data is geocoded and licensed by the US Government Works. 
+For our analysis, our outcome of interest is whether or not a patient got diagnosed with breast cancer within the first 90 days. For our predictors, we have a lot of different options and we pulled 83 variables that could be important predictors. To list a few, we are interested in whether or not a patient is insured, race, age, zip code, and particulate matter pollution. We plan on creating a model that looks at the “best” predictors to include those in the model. 
+
+
+# Data Summaries
+
+```{r}
+breast_cancer<-read.csv("Data/training.csv")
+hospitals<- read.csv("Data/Hospitals.csv")
+```
+
+```{r}
+dim(breast_cancer)
+names(breast_cancer)
+head(breast_cancer)
+str(breast_cancer)
+```
+
+```{r}
+dim(hospitals)
+names(hospitals)
+head(hospitals)
+str(hospitals)
+```
+
+# Data Viz
+
+```{r}
+hospital_data_per_state <- hospitals %>%
+  group_by(STATE) %>%
+  summarise(total_hospitals = n()) %>%
+  arrange(desc(total_hospitals))
+```
+
+```{r, fig.height=10}
+# Hospitals by State
+  ggplot(hospital_data_per_state, aes(x = reorder(STATE, total_hospitals), y = total_hospitals)) +
+  geom_bar(stat = "identity") +
+  theme(
+    plot.title = element_text(size = 20),  # Adjust the title size
+    axis.title.x = element_text(size = 16),  # Adjust x-axis label size
+    axis.title.y = element_text(size = 16),  # Adjust y-axis label size
+    axis.text.x = element_text(size = 15),  # Adjust x-axis tick label size
+    axis.text.y = element_text(size = 8),  # Adjust y-axis tick label size
+    legend.text = element_text(size = 14)  # Adjust legend text size
+  ) +
+  theme_minimal() +  # You can use a different theme if you prefer
+  theme(
+    plot.background = element_rect(fill = "white"),  # Set plot background color
+    panel.grid.major = element_line(color = "lightgray"),  # Adjust major gridlines
+    panel.grid.minor = element_blank()  # Remove minor gridlines
+  ) +
+  labs(
+    title = "Hospitals by State",
+    x = "State",
+    y = "Total Hospitals"
+  ) +
+  coord_flip() 
+```
+
+```{r}
+#Map of total hospitals per state
+hospital_data_per_state <- hospital_data_per_state %>%
+  dplyr::rename(state = STATE)
+```
+
+```{r}
+MapOfStatesTotalHospitals <- plot_usmap(data = hospital_data_per_state, values = "total_hospitals", region = "state") + 
+  labs(title = "US States by low to high amount of hospitals",
+       subtitle = "White being the lowest percent and blue being the highest") + 
+    scale_fill_continuous(low = "white", high = "blue", name = "Percent", label = scales::comma) +
+  theme(panel.background=element_blank(),
+        plot.title = element_text(size = 15))
+MapOfStatesTotalHospitals
+```
+
+```{r}
+health_data_perc <- breast_cancer %>%
+  filter(!is.na(DiagPeriodL90D), !is.na(payer_type)) %>%
+  group_by(DiagPeriodL90D, payer_type) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100) 
+
+health_data_perc %>% 
+ggplot(aes(x = as.factor(DiagPeriodL90D), y = percentage, fill = payer_type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = paste0(round(percentage), "%")), position = position_dodge(width = 0.7), vjust = -0.5) +
+  scale_fill_discrete(name = "Payer Type") +  
+  labs(x = "Diagnosis", y = "Percentage", title = "Percentage of Payer Types within Diagnosis") +
+  theme_minimal()
+```
+
+
+# Model Building
+
+```{r}
+#Model
+diag_post <- stan_glm(
+ DiagPeriodL90D  ~ patient_race,
+  family = binomial,
+  prior_PD = FALSE,
+  data = breast_cancer,
+  chains = 4, iter = 5000*2, seed = 84735, refresh = 0)
+
+pp_check(diag_post)
+```
+
+
+# Next Steps
+
+Our final material will be in a blog post. In our next steps, we want to further explore which predictors we should use in model creation, use cross validation to see how good our models are, create visualizations of what our models tell us, and create plots that show our MCMC chains, to (hopefully) show stable chains. 
+
+
+
+
