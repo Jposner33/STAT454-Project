@@ -87,6 +87,8 @@ hospital_data_per_state <- hospitals %>%
   coord_flip() 
 ```
 
+Texas, California, and Florida lead the U.S. in number of hospitals. We could expand on this by looking at hospitals per people because those states have the highest population, so it makes sense that there would be more hospitals. 
+
 ```{r}
 #Map of total hospitals per state
 hospital_data_per_state <- hospital_data_per_state %>%
@@ -105,7 +107,8 @@ MapOfStatesTotalHospitals
 
 ```{r}
 health_data_perc <- breast_cancer %>%
-  filter(!is.na(DiagPeriodL90D), !is.na(payer_type)) %>%
+  filter(!is.na(payer_type) & payer_type != "") %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>%
   group_by(DiagPeriodL90D, payer_type) %>%
   summarise(count = n()) %>%
   mutate(percentage = count / sum(count) * 100) 
@@ -118,6 +121,25 @@ ggplot(aes(x = as.factor(DiagPeriodL90D), y = percentage, fill = payer_type)) +
   labs(x = "Diagnosis", y = "Percentage", title = "Percentage of Payer Types within Diagnosis") +
   theme_minimal()
 ```
+
+We notice that people who have commercial, or private, health insurance get diagnosed more frequently within 90 days than people with medicaid or medicare advantage. 
+
+
+```{r}
+#Diagnosed within 90 days by race
+diag_race<-breast_cancer %>%
+  filter(!is.na(patient_race) & patient_race != "") %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>% 
+  group_by(patient_race) %>%
+  summarise(avg_diag_90 = mean(DiagPeriodL90D))
+
+ggplot(diag_race, aes(x=patient_race, y=avg_diag_90))+
+  geom_point()+
+  labs(x="Patient Race", y="Average Diagnosed Under 90 Days", title = "Diagnosed Under 90 Days by Race")+
+  theme_minimal()
+```
+
+While the averages are somewhat close, we notice that white people get diagnosed within 90 days more than any other race while black people are diagnosed before 90 days at lower rates. 
 
 
 # Model Building
