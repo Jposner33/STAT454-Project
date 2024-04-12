@@ -17,6 +17,7 @@ library(rnaturalearth)
 library(glmnet)
 library(rstan)
 library(rstanarm)
+library(plotly)
 ```
 
 
@@ -99,9 +100,9 @@ hospital_data_per_state <- hospital_data_per_state %>%
 MapOfStatesTotalHospitals <- plot_usmap(data = hospital_data_per_state, values = "total_hospitals", region = "state") + 
   labs(title = "US States by low to high amount of hospitals",
        subtitle = "White being the lowest percent and blue being the highest") + 
-    scale_fill_continuous(low = "white", high = "blue", name = "Percent", label = scales::comma) +
-  theme(panel.background=element_blank(),
-        plot.title = element_text(size = 15))
+  scale_fill_continuous(low = "white", high = "blue", name = "Total Hospitals", label = scales::comma) +
+  theme_minimal()
+
 MapOfStatesTotalHospitals
 ```
 
