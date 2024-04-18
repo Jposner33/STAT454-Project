@@ -23,12 +23,14 @@ library(plotly)
 
 # Research Question
 
-Looking at patients who were diagnosed with breast cancer from 2015-2018, we want to study what parameters affected whether or not a breast cancer patient was diagnosed within 90 days of their first hospital visit. We also want to explore how accurate we can get with our predictions using a Bayesian lasso model. 
+Looking at patients who were diagnosed with breast cancer from 2015-2018, we want to study what parameters affected whether or not a breast cancer patient was diagnosed within 90 days of their first hospital visit. We can further explore this by using a Bayesian lasso model to see how accurate we can get with our predictions
 
 # Data background
 
-We use a dataset from Health Verity (HV), which is a large healthcare-related ecosystem specifically for US data. The data were created by a Kaggle challenge where they joined multiple datasets including health predictors, demographics, socioeconomic status, and zip codes. In particular, this HV dataset has patient-level data for individuals who were diagnosed with metastatic triple-negative breast cancers. Additionally, the dataset was merged with environmental databases to include toxic air pollution and its effect on labor outcomes. 
+We use a dataset from Health Verity (HV), a large healthcare-related ecosystem specifically for US data. The data were created by a Kaggle challenge where they joined multiple datasets including health predictors, demographics, socioeconomic status, and zip codes. In particular, this HV dataset has patient-level data for individuals who were diagnosed with metastatic triple-negative breast cancers. Additionally, the dataset was merged with environmental databases to include toxic air pollution and its effect on labor outcomes. 
+
 Moreover, we use a hospital dataset from all 50 US states and territories. We are hoping to eventually merge these two datasets so we can have all the demographic data and healthcare equity predictors and be able to analyze them with the spatial data from our second dataset. This data is geocoded and licensed by the US Government Works. 
+
 For our analysis, our outcome of interest is whether or not a patient got diagnosed with breast cancer within the first 90 days. For our predictors, we have a lot of different options and we pulled 83 variables that could be important predictors. To list a few, we are interested in whether or not a patient is insured, race, age, zip code, and particulate matter pollution. We plan on creating a model that looks at the “best” predictors to include those in the model. 
 
 

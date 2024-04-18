@@ -1,0 +1,464 @@
+---
+title: "Progress Report 2"
+author: "Lilith Appel, Jacob Posner, Mateo Useche"
+date: "2024-04-11"
+output: 
+  html_document:
+    theme: sandstone
+    highlight: tango
+---
+
+```{r include = FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  collapse = TRUE, 
+  echo = FALSE, 
+  fig.height = 3, 
+  fig.width = 5,
+  fig.align = 'center')
+```
+
+
+```{r}
+#Load packages
+library(bayesrules)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(usmap)
+library(sf)
+library(rnaturalearth)
+library(glmnet)
+library(rstan)
+library(rstanarm)
+library(plotly)
+```
+
+```{r include = TRUE}
+# Set a more color blind friendly palette 
+palette("Okabe-Ito")
+scale_colour_discrete <- function(...) scale_colour_manual(values = palette())
+scale_fill_discrete   <- function(...) scale_fill_manual(values = palette())
+```
+
+```{r}
+# Load the data
+patient_data<-read.csv("Data/training.csv")
+hospital_data<- read.csv("Data/Hospitals.csv")
+population_data <- read.csv("Data/nst-est2019-alldata.csv")
+population_data <- population_data %>% 
+  select(NAME, POPESTIMATE2018) %>% 
+  filter(NAME != c("United States", "Northeast Region", "Midwest Region", "South Region", "West Region")) 
+```
+
+```{r}
+hospital_data_zip <- hospital_data %>%
+  mutate(patient_zip3=substr(hospital_data$ZIP, 1,3)) 
+hospital_data_zip$patient_zip3 <- strtoi(hospital_data_zip$patient_zip3)
+```
+
+```{r}
+combined_data <- left_join(hospital_data_zip, patient_data, by = "patient_zip3", relationship = "many-to-many")
+```
+
+```{r, eval=FALSE}
+length(unique(patient_data$patient_id))
+length(unique(combined_data$patient_id))
+```
+
+```{r}
+combined_data_clean <- combined_data %>%
+  select(-c(X,Y,OBJECTID,NAME,ADDRESS,ZIP4,TELEPHONE,COUNTRY,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,TTL_STAFF,HELIPAD,patient_gender,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+```
+
+```{r}
+# Adding population to the data
+state_abbreviations <- data.frame(
+  full_name = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
+                "Delaware", "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", 
+                "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", 
+                "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", 
+                "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", 
+                "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", 
+                "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", 
+                "Wisconsin", "Wyoming", "Puerto Rico"),
+  abbreviation = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", 
+                   "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", 
+                   "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", 
+                   "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "PR")
+)
+```
+
+```{r}
+population_data_abv <- population_data %>%
+  left_join(state_abbreviations, by = c("NAME" = "full_name")) %>%
+  mutate(STATE = coalesce(abbreviation, "Unknown")) # If abbreviation is missing, mark it as "Unknown"
+```
+
+```{r}
+combined_data_clean1 <- left_join(combined_data_clean, population_data_abv, by = "STATE") %>% 
+  select(-c(NAME, abbreviation))
+
+total_hospitals <- hospital_data %>% 
+  group_by(STATE) %>%
+  summarise(total_hospitals = n()) %>%
+  arrange(desc(total_hospitals))
+
+full_dataset<-left_join(combined_data_clean1, total_hospitals, by = "STATE")
+
+hospital_data_per_state <- full_dataset %>%
+  mutate(ppl_per_hos = POPESTIMATE2018/total_hospitals) %>% 
+  select(STATE, ppl_per_hos) %>% 
+  group_by(STATE) %>% 
+  summarize(ppl_per_hos = mean(ppl_per_hos)) %>% 
+  filter(STATE != "AS") %>% 
+  filter(STATE != "GU") %>% 
+  filter(STATE != "MP") %>% 
+  filter(STATE != "PW") %>% 
+  filter(STATE != "VI")
+```
+
+## Introduction 
+
+Exploring hospital access and healthcare equality through breast cancer patients. 
+
+# Research Question
+
+Looking at patients who were diagnosed with breast cancer from 2015-2018, we want to study what parameters affected whether or not a breast cancer patient was diagnosed within 90 days of their first hospital visit. We can further explore this by using a Bayesian ridge regression model to see how accurate we can get with our predictions.
+
+# Data Background
+- Health Verity (HV) Dataset
+  - Healthcare-related ecosystem specifically for U.S. data
+  - Created by a Kaggle challenge containing multiple data sets including health predictors, demographics, socioeconomic status, and zip codes
+  - This HV dataset has patient-level data for individuals who were diagnosed with metastatic triple-negative breast cancers
+  - Also merged with environmental databases to include toxic air pollution
+- Hospital Dataset
+  - Contains data from all 50 U.S. states and territories
+  - Geocoded and licensed by the U.S. Government Works
+  - Merged the two data sets to have demographic and healthcare data in one dataset
+- Analysis of Data
+  - Our outcome of interest is whether or not a patient got diagnosed with breast cancer within the first 90 days
+  - 91 variables that could be important predictors
+  - Particularly interested in whether or not a patient is insured, race, age, zip code, and particulate matter pollution
+  - We plan on creating a preliminary model that looks at the “best” predictors to include those in the final model
+- Final Data Set
+  - Included data from U.S. hospitals, breast cancer patient data, and 2018 state population data
+  - We merged all of this data to include everything we needed for our analysis
+
+# Data Viz
+
+```{r, fig.height=10}
+# Hospitals by State
+  ggplot(hospital_data_per_state, aes(x = reorder(STATE, ppl_per_hos), y = ppl_per_hos)) +
+  geom_bar(stat = "identity") +
+  theme(
+    plot.title = element_text(size = 20),  # Adjust the title size
+    axis.title.x = element_text(size = 16),  # Adjust x-axis label size
+    axis.title.y = element_text(size = 16),  # Adjust y-axis label size
+    axis.text.x = element_text(size = 15),  # Adjust x-axis tick label size
+    axis.text.y = element_text(size = 8),  # Adjust y-axis tick label size
+    legend.text = element_text(size = 14)  # Adjust legend text size
+  ) +
+  theme_minimal() +  # You can use a different theme if you prefer
+  theme(
+    plot.background = element_rect(fill = "white"),  # Set plot background color
+    panel.grid.major = element_line(color = "lightgray"),  # Adjust major gridlines
+    panel.grid.minor = element_blank()  # Remove minor gridlines
+  ) +
+  labs(
+    title = "People per Hospitals by State",
+    x = "State",
+    y = "People per Hospital"
+  ) +
+  coord_flip() 
+```
+
+Upon further investigation, Connecticut and Maryland have the most people per hospital, meaning there isn't a lot of hospital access in those states. 
+
+```{r}
+hospital_data_per_state1 <- rename(hospital_data_per_state, state = STATE)
+
+MapOfStatesTotalHospitals <- plot_usmap(data = hospital_data_per_state1, values = "ppl_per_hos", region = "state") + 
+  labs(title = "US States by low to high amount of people per hospital",
+       subtitle = "White being the lowest and blue being the highest") + 
+  scale_fill_continuous(low = "white", high = "blue", name = "People per hospital", label = scales::comma) +
+  theme_minimal()
+
+MapOfStatesTotalHospitals
+```
+
+This map confirms the previous claim that Maryland and Connecticut have low hospital access. California and New York also have lower access than other states. A couple reasons why we observe this is because California and New York have a lot of people while Connecticut and Maryland have smaller states with not a lot of room for hospitals. 
+
+```{r}
+health_data_perc <- patient_data %>%
+  filter(!is.na(payer_type) & payer_type != "") %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>%
+  group_by(DiagPeriodL90D, payer_type) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100) 
+
+health_data_perc %>% 
+ggplot(aes(x = as.factor(DiagPeriodL90D), y = percentage, fill = payer_type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = paste0(round(percentage), "%")), position = position_dodge(width = 0.7), vjust = -0.5) +
+  scale_fill_discrete(name = "Payer Type") +  
+  labs(x = "Diagnosis", y = "Percentage", title = "Percentage of Payer Types within Diagnosis") +
+  theme_minimal()
+```
+
+We notice that people who have commercial, or private, health insurance get diagnosed more frequently within 90 days than people with medicaid or medicare advantage. 
+
+```{r}
+#Diagnosed within 90 days by race
+diag_race<-patient_data %>%
+  filter(!is.na(patient_race) & patient_race != "") %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>% 
+  group_by(patient_race) %>%
+  summarise(avg_diag_90 = mean(DiagPeriodL90D))
+
+ggplot(diag_race, aes(x=patient_race, y=avg_diag_90))+
+  geom_point()+
+  labs(x="Patient Race", y="Average Diagnosed Under 90 Days", title = "Diagnosed Under 90 Days by Race")+
+  theme_minimal()
+```
+
+While the averages are somewhat close, we notice that white people get diagnosed within 90 days more than any other race while black people are diagnosed before 90 days at lower rates. 
+
+# Methodology
+
+
+
+
+
+
+
+
+
+# Model
+
+```{r}
+ridge_model_hospitals_group <- readRDS("~/Downloads/ridge_model_hospitals_group.rds")
+```
+
+```{r}
+pp_check(ridge_model_hospitals_group)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Code Appendix
+
+```{r include = FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  collapse = TRUE, 
+  echo = TRUE, 
+  eval = FALSE, 
+  fig.height = 3, 
+  fig.width = 5,
+  fig.align = 'center')
+```
+
+# Load Data
+
+```{r, eval=FALSE}
+#Load packages
+library(bayesrules)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(usmap)
+library(sf)
+library(rnaturalearth)
+library(glmnet)
+library(rstan)
+library(rstanarm)
+library(plotly)
+```
+
+```{r, eval=FALSE}
+# Set a more color blind friendly palette 
+palette("Okabe-Ito")
+scale_colour_discrete <- function(...) scale_colour_manual(values = palette())
+scale_fill_discrete   <- function(...) scale_fill_manual(values = palette())
+```
+
+```{r, eval=FALSE}
+# Load the data
+patient_data<-read.csv("Data/training.csv")
+hospital_data<- read.csv("Data/Hospitals.csv")
+population_data <- read.csv("Data/nst-est2019-alldata.csv")
+population_data <- population_data %>% 
+  select(NAME, POPESTIMATE2018) %>% 
+  filter(NAME != c("United States", "Northeast Region", "Midwest Region", "South Region", "West Region")) 
+```
+
+# Clean Data
+
+```{r}
+# Get Zip Codes
+hospital_data_zip <- hospital_data %>%
+  mutate(patient_zip3=substr(hospital_data$ZIP, 1,3)) 
+hospital_data_zip$patient_zip3 <- strtoi(hospital_data_zip$patient_zip3)
+```
+
+```{r}
+# Add Zipcodes to Data
+combined_data <- left_join(hospital_data_zip, patient_data, by = "patient_zip3", relationship = "many-to-many")
+```
+
+```{r}
+#Check how many rows we lost
+length(unique(patient_data$patient_id))
+length(unique(combined_data$patient_id))
+```
+
+```{r}
+#Select relevant variables
+combined_data_clean <- combined_data %>%
+  select(-c(X,Y,OBJECTID,NAME,ADDRESS,ZIP4,TELEPHONE,COUNTRY,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,TTL_STAFF,HELIPAD,patient_gender,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+```
+
+```{r}
+# Add state abbreviations
+state_abbreviations <- data.frame(
+  full_name = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
+                "Delaware", "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", 
+                "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", 
+                "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", 
+                "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", 
+                "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", 
+                "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", 
+                "Wisconsin", "Wyoming", "Puerto Rico"),
+  abbreviation = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", 
+                   "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", 
+                   "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", 
+                   "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "PR")
+)
+```
+
+```{r}
+# Combining population and abbreviations
+population_data_abv <- population_data %>%
+  left_join(state_abbreviations, by = c("NAME" = "full_name")) %>%
+  mutate(STATE = coalesce(abbreviation, "Unknown")) # If abbreviation is missing, mark it as "Unknown"
+```
+
+```{r}
+# Adding population to the data
+combined_data_clean1 <- left_join(combined_data_clean, population_data_abv, by = "STATE") %>% 
+  select(-c(NAME, abbreviation))
+
+total_hospitals <- hospital_data %>% 
+  group_by(STATE) %>%
+  summarise(total_hospitals = n()) %>%
+  arrange(desc(total_hospitals))
+
+full_dataset<-left_join(combined_data_clean1, total_hospitals, by = "STATE")
+
+hospital_data_per_state <- full_dataset %>%
+  mutate(ppl_per_hos = POPESTIMATE2018/total_hospitals) %>% 
+  select(STATE, ppl_per_hos) %>% 
+  group_by(STATE) %>% 
+  summarize(ppl_per_hos = mean(ppl_per_hos)) %>% 
+  filter(STATE != "AS") %>% 
+  filter(STATE != "GU") %>% 
+  filter(STATE != "MP") %>% 
+  filter(STATE != "PW") %>% 
+  filter(STATE != "VI")
+```
+
+# Data Viz
+
+```{r, fig.height=10}
+# Hospitals by State
+  ggplot(hospital_data_per_state, aes(x = reorder(STATE, ppl_per_hos), y = ppl_per_hos)) +
+  geom_bar(stat = "identity") +
+  theme(
+    plot.title = element_text(size = 20),  # Adjust the title size
+    axis.title.x = element_text(size = 16),  # Adjust x-axis label size
+    axis.title.y = element_text(size = 16),  # Adjust y-axis label size
+    axis.text.x = element_text(size = 15),  # Adjust x-axis tick label size
+    axis.text.y = element_text(size = 8),  # Adjust y-axis tick label size
+    legend.text = element_text(size = 14)  # Adjust legend text size
+  ) +
+  theme_minimal() +  # You can use a different theme if you prefer
+  theme(
+    plot.background = element_rect(fill = "white"),  # Set plot background color
+    panel.grid.major = element_line(color = "lightgray"),  # Adjust major gridlines
+    panel.grid.minor = element_blank()  # Remove minor gridlines
+  ) +
+  labs(
+    title = "People per Hospitals by State",
+    x = "State",
+    y = "People per Hospital"
+  ) +
+  coord_flip() 
+```
+
+```{r}
+# Map of U.S. states with people per hospital
+hospital_data_per_state1 <- rename(hospital_data_per_state, state = STATE)
+
+MapOfStatesTotalHospitals <- plot_usmap(data = hospital_data_per_state1, values = "ppl_per_hos", region = "state") + 
+  labs(title = "US States by low to high amount of people per hospital",
+       subtitle = "White being the lowest and blue being the highest") + 
+  scale_fill_continuous(low = "white", high = "blue", name = "People per hospital", label = scales::comma) +
+  theme_minimal()
+
+MapOfStatesTotalHospitals
+```
+
+```{r}
+#Percentage of people diagnosed by type of insurance
+health_data_perc <- patient_data %>%
+  filter(!is.na(payer_type) & payer_type != "") %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>%
+  group_by(DiagPeriodL90D, payer_type) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100) 
+
+health_data_perc %>% 
+ggplot(aes(x = as.factor(DiagPeriodL90D), y = percentage, fill = payer_type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = paste0(round(percentage), "%")), position = position_dodge(width = 0.7), vjust = -0.5) +
+  scale_fill_discrete(name = "Payer Type") +  
+  labs(x = "Diagnosis", y = "Percentage", title = "Percentage of Payer Types within Diagnosis") +
+  theme_minimal()
+```
+
+```{r}
+#Diagnosed within 90 days by race
+diag_race<-patient_data %>%
+  filter(!is.na(patient_race) & patient_race != "") %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>% 
+  group_by(patient_race) %>%
+  summarise(avg_diag_90 = mean(DiagPeriodL90D))
+
+ggplot(diag_race, aes(x=patient_race, y=avg_diag_90))+
+  geom_point()+
+  labs(x="Patient Race", y="Average Diagnosed Under 90 Days", title = "Diagnosed Under 90 Days by Race")+
+  theme_minimal()
+```
