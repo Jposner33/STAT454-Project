@@ -19,20 +19,24 @@ knitr::opts_chunk$set(
   fig.align = 'center')
 ```
 
-
 ```{r}
 #Load packages
 library(bayesrules)
+library(pROC)
 library(tidyr)
 library(tidyverse)
 library(ggplot2)
 library(usmap)
 library(sf)
 library(rnaturalearth)
+library(bayesplot)
+library(broom)
+library(broom.mixed)
 library(glmnet)
 library(rstan)
 library(rstanarm)
 library(plotly)
+library(usethis)
 ```
 
 ```{r include = TRUE}
@@ -68,8 +72,25 @@ length(unique(combined_data$patient_id))
 ```
 
 ```{r}
-combined_data_clean <- combined_data %>%
-  select(-c(X,Y,OBJECTID,NAME,ADDRESS,ZIP4,TELEPHONE,COUNTRY,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,TTL_STAFF,HELIPAD,patient_gender,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+combined_data_hs <- combined_data %>%
+  group_by(patient_id) %>%
+  mutate(total_hospitals = n()) %>%
+  distinct(patient_id, .keep_all = TRUE)
+```
+
+```{r}
+combined_data_hs_clean <- combined_data_hs %>%
+  select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+```
+
+```{r}
+combined_data_hs_clean$Ozone <- as.numeric(combined_data_hs_clean$Ozone)
+combined_data_hs_clean$PM25 <- as.numeric(combined_data_hs_clean$PM25)
+combined_data_hs_clean$N02 <- as.numeric(combined_data_hs_clean$N02)
+```
+
+```{r}
+combined_data_hs_clean <- na.omit(combined_data_hs_clean)
 ```
 
 ```{r}
@@ -97,7 +118,7 @@ population_data_abv <- population_data %>%
 ```
 
 ```{r}
-combined_data_clean1 <- left_join(combined_data_clean, population_data_abv, by = "STATE") %>% 
+combined_data_clean1 <- left_join(combined_data_hs_clean, population_data_abv, by = "STATE") %>% 
   select(-c(NAME, abbreviation))
 
 total_hospitals <- hospital_data %>% 
@@ -105,46 +126,48 @@ total_hospitals <- hospital_data %>%
   summarise(total_hospitals = n()) %>%
   arrange(desc(total_hospitals))
 
-full_dataset<-left_join(combined_data_clean1, total_hospitals, by = "STATE")
+full_dataset<-left_join(combined_data_clean1, total_hospitals, by = "STATE") 
+
+full_dataset$POPESTIMATE2018 <- as.numeric(full_dataset$POPESTIMATE2018)
+full_dataset$total_hospitals.y <- as.numeric(full_dataset$total_hospitals.y)
 
 hospital_data_per_state <- full_dataset %>%
-  mutate(ppl_per_hos = POPESTIMATE2018/total_hospitals) %>% 
+  mutate(
+    ppl_per_hos = POPESTIMATE2018 / total_hospitals.y
+  ) %>% 
   select(STATE, ppl_per_hos) %>% 
   group_by(STATE) %>% 
-  summarize(ppl_per_hos = mean(ppl_per_hos)) %>% 
-  filter(STATE != "AS") %>% 
-  filter(STATE != "GU") %>% 
-  filter(STATE != "MP") %>% 
-  filter(STATE != "PW") %>% 
-  filter(STATE != "VI")
+  summarize(ppl_per_hos = mean(ppl_per_hos, na.rm = TRUE)) %>% 
+  filter(!STATE %in% c("AS", "GU", "MP", "PW", "VI"))
 ```
 
-## Introduction 
+## Introduction
 
-Exploring hospital access and healthcare equality through breast cancer patients. 
+Exploring hospital access and healthcare equality through breast cancer patients.
 
 # Research Question
 
 Looking at patients who were diagnosed with breast cancer from 2015-2018, we want to study what parameters affected whether or not a breast cancer patient was diagnosed within 90 days of their first hospital visit. We can further explore this by using a Bayesian ridge regression model to see how accurate we can get with our predictions.
 
 # Data Background
-- Health Verity (HV) Dataset
-  - Healthcare-related ecosystem specifically for U.S. data
-  - Created by a Kaggle challenge containing multiple data sets including health predictors, demographics, socioeconomic status, and zip codes
-  - This HV dataset has patient-level data for individuals who were diagnosed with metastatic triple-negative breast cancers
-  - Also merged with environmental databases to include toxic air pollution
-- Hospital Dataset
-  - Contains data from all 50 U.S. states and territories
-  - Geocoded and licensed by the U.S. Government Works
-  - Merged the two data sets to have demographic and healthcare data in one dataset
-- Analysis of Data
-  - Our outcome of interest is whether or not a patient got diagnosed with breast cancer within the first 90 days
-  - 91 variables that could be important predictors
-  - Particularly interested in whether or not a patient is insured, race, age, zip code, and particulate matter pollution
-  - We plan on creating a preliminary model that looks at the “best” predictors to include those in the final model
-- Final Data Set
-  - Included data from U.S. hospitals, breast cancer patient data, and 2018 state population data
-  - We merged all of this data to include everything we needed for our analysis
+
+-   Health Verity (HV) Dataset
+    -   Healthcare-related ecosystem specifically for U.S. data
+    -   Created by a Kaggle challenge containing multiple data sets including health predictors, demographics, socioeconomic status, and zip codes
+    -   This HV dataset has patient-level data for individuals who were diagnosed with metastatic triple-negative breast cancers
+    -   Also merged with environmental databases to include toxic air pollution
+-   Hospital Dataset
+    -   Contains data from all 50 U.S. states and territories
+    -   Geocoded and licensed by the U.S. Government Works
+    -   Merged the two data sets to have demographic and healthcare data in one dataset
+-   Analysis of Data
+    -   Our outcome of interest is whether or not a patient got diagnosed with breast cancer within the first 90 days
+    -   91 variables that could be important predictors
+    -   Particularly interested in whether or not a patient is insured, race, age, zip code, and particulate matter pollution
+    -   We plan on creating a preliminary model that looks at the “best” predictors to include those in the final model
+-   Final Data Set
+    -   Included data from U.S. hospitals, breast cancer patient data, and 2018 state population data
+    -   We merged all of this data to include everything we needed for our analysis
 
 # Data Viz
 
@@ -174,7 +197,8 @@ Looking at patients who were diagnosed with breast cancer from 2015-2018, we wan
   coord_flip() 
 ```
 
-Upon further investigation, Connecticut and Maryland have the most people per hospital, meaning there isn't a lot of hospital access in those states. 
+-   Connecticut and Maryland have the most people per hospital
+    -   Isn't a lot of hospital access in those states.
 
 ```{r}
 hospital_data_per_state1 <- rename(hospital_data_per_state, state = STATE)
@@ -188,7 +212,9 @@ MapOfStatesTotalHospitals <- plot_usmap(data = hospital_data_per_state1, values 
 MapOfStatesTotalHospitals
 ```
 
-This map confirms the previous claim that Maryland and Connecticut have low hospital access. California and New York also have lower access than other states. A couple reasons why we observe this is because California and New York have a lot of people while Connecticut and Maryland have smaller states with not a lot of room for hospitals. 
+-   This map confirms the previous claim that Maryland and Connecticut have low hospital access
+-   California and New York also have lower access than other states
+    -   We observe this is because California and New York have a lot of people while Connecticut and Maryland have smaller states with not a lot of room for hospitals.
 
 ```{r}
 health_data_perc <- patient_data %>%
@@ -207,7 +233,7 @@ ggplot(aes(x = as.factor(DiagPeriodL90D), y = percentage, fill = payer_type)) +
   theme_minimal()
 ```
 
-We notice that people who have commercial, or private, health insurance get diagnosed more frequently within 90 days than people with medicaid or medicare advantage. 
+-   We notice that people who have commercial, or private, health insurance get diagnosed more frequently within 90 days than people with medicaid or medicare advantage
 
 ```{r}
 #Diagnosed within 90 days by race
@@ -223,49 +249,132 @@ ggplot(diag_race, aes(x=patient_race, y=avg_diag_90))+
   theme_minimal()
 ```
 
-While the averages are somewhat close, we notice that white people get diagnosed within 90 days more than any other race while black people are diagnosed before 90 days at lower rates. 
+-   While the averages are somewhat close, we notice that white people get diagnosed within 90 days more than any other race while black people are diagnosed before 90 days at lower rates.
 
-# Methodology
+## Methodology
 
-
-
-
-
-
-
-
-
-# Model
+# Preliminary Model
 
 ```{r}
-ridge_model_hospitals_group <- readRDS("~/Downloads/ridge_model_hospitals_group.rds")
+diag_post3 <- stan_glm(
+ DiagPeriodL90D  ~ patient_race + patient_zip3 + patient_age + payer_type,
+  family = binomial,
+  prior_PD = FALSE,
+  data = patient_data,
+  chains = 4, iter = 5000*2, seed = 84735, refresh = 0)
 ```
 
 ```{r}
-pp_check(ridge_model_hospitals_group)
+pp_check(diag_post3)
 ```
 
+```{r}
+mcmc_trace(diag_post3)
+```
 
+-   When we look at the traceplots for our various predictors we see random patterns which is what we want
+-   There are no places where the chains get stuck or seem to follow a trend.
 
+```{r}
+mcmc_acf(diag_post3)
+```
 
+-   The autocorrelation plots tell us that for this model our chains drop down to no correlation quickly
+-   This is a necessary assumption for our us to believe that the chains and sample are random.
 
+# Error Metrics
 
+```{r}
+classification_summary(diag_post3, patient_data, cutoff = 0.5)
+```
 
+-   Our model has 99.8% sensitivity
+    -   Very good at giving a true positives
+-   However, specificity is very low with almost zero
+    -   Very bad at giving a true negative
+-   Our overall accuracy is 62%
+-   Since we did not use cross validation, we expect our model to do worse in a new dataset and have these measures decrease
 
+# Analysis
 
+-   We began our analysis of the dataset through a simple Bayesian logistic model.
+-   Before we did anything too complex, we thought it would be good to construct a model that, intuitively, made sense to us.
+-   For example, we asked ourselves the question what factors play the biggest role in a correct diagnosis of breast cancer?
+-   Then we decided to incorporate some predictors we thought could influence diagnosis from our prior knowledge, like race and type of insurance.
+-   Overall, our preliminary model helped inform us that our intuition for variables that affect diagnosis was on the right track.
+-   It can serve as a check for when we construct a Bayesian model that penalizes insignificant variables, but we might think they proive necessary information.
 
+# Laplace Model
 
+```{r, eval=FALSE}
+ridge_model_climb_hs <- stan_glm(DiagPeriodL90D ~.,
+                        data = combined_data_hs_clean,
+                        family = binomial,
+                        prior = laplace(autoscale = TRUE),
+                        chains = 4,iter = 2500 * 2, cores = 2)
+saveRDS(ridge_model_climb_hs,"~/Desktop/hs_model.rds")
+```
 
+-   We originally wanted to use a lasso prior to auto filter our data
+    -   After analysis, we noticed it required a normal likelihood, but our data is binomial
+-   Switched to a laplace prior
+    -   Assumes variables will be zero,
+    -   Pushed a lot of the original 77 variables to zero while keeping some important predictors
 
+```{r}
+hs_mod <- readRDS("hs_model.rds")
+```
 
+```{r}
+pp_check(hs_mod)
+```
 
+-   Using the pp_check we see that our possible models created by our model follow the data
 
+```{r}
+mcmc_trace(hs_mod, pars = "DivisionNew England", "income_individual_median")
+```
 
+-   We see that the trace plots are very stable for one of the predictors that was kept in by the model (Division New england), and one that was kicked out (income_indivudal_median)
 
+```{r}
+mcmc_acf(hs_mod, pars = "DivisionNew England", "income_individual_median")
+```
 
+-   We also see low autocorrection within our chains, as by around 3-4 steps they are no longer dependent
 
+```{r}
+tidy(hs_mod, conf.int = 0.8, conf.level = 0.8)
+```
 
+-   In this general this tidy plot, is a lot to look at but looking through we can see a large amount of estimates that have been sent to very small values, and many predictors credible interval cross zero
 
+```{r}
+# Make predictions (probability of success)
+predictions <- predict(hs_mod, newdata = as.data.frame(combined_data_hs_clean), type = "response")
+
+# Create ROC curve
+roc_curve <- roc(combined_data_hs_clean$DiagPeriodL90D, predictions)
+```
+
+```{r}
+i <- 25
+
+# Get sensitivity and specificity at the chosen cutoff point
+sensitivity <- roc_curve$sensitivities[i]
+specificity <- 1 - roc_curve$specificities[i]
+
+# Calculate accuracy
+accuracy <- (roc_curve$sensitivities[i] + (1 - roc_curve$specificities[i])) / 2
+
+# Print the results
+print(paste("Sensitivity:", sensitivity))
+print(paste("Specificity:", specificity))
+print(paste("Accuracy:", accuracy))
+```
+
+-   We notice that we have high accuracy, sensitivity, and specificity
+    -   Did not use any cross validation, therefore for an outside dataset, our model would be expected to score lower in sensitivity, specificity, and accuracy ratings
 
 ## Code Appendix
 
@@ -305,7 +414,7 @@ scale_colour_discrete <- function(...) scale_colour_manual(values = palette())
 scale_fill_discrete   <- function(...) scale_fill_manual(values = palette())
 ```
 
-```{r, eval=FALSE}
+```{r}
 # Load the data
 patient_data<-read.csv("Data/training.csv")
 hospital_data<- read.csv("Data/Hospitals.csv")
@@ -315,34 +424,45 @@ population_data <- population_data %>%
   filter(NAME != c("United States", "Northeast Region", "Midwest Region", "South Region", "West Region")) 
 ```
 
-# Clean Data
-
 ```{r}
-# Get Zip Codes
 hospital_data_zip <- hospital_data %>%
   mutate(patient_zip3=substr(hospital_data$ZIP, 1,3)) 
 hospital_data_zip$patient_zip3 <- strtoi(hospital_data_zip$patient_zip3)
 ```
 
 ```{r}
-# Add Zipcodes to Data
 combined_data <- left_join(hospital_data_zip, patient_data, by = "patient_zip3", relationship = "many-to-many")
 ```
 
-```{r}
-#Check how many rows we lost
+```{r, eval=FALSE}
 length(unique(patient_data$patient_id))
 length(unique(combined_data$patient_id))
 ```
 
 ```{r}
-#Select relevant variables
-combined_data_clean <- combined_data %>%
-  select(-c(X,Y,OBJECTID,NAME,ADDRESS,ZIP4,TELEPHONE,COUNTRY,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,TTL_STAFF,HELIPAD,patient_gender,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+combined_data_hs <- combined_data %>%
+  group_by(patient_id) %>%
+  mutate(total_hospitals = n()) %>%
+  distinct(patient_id, .keep_all = TRUE)
 ```
 
 ```{r}
-# Add state abbreviations
+combined_data_hs_clean <- combined_data_hs %>%
+  select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+```
+
+```{r}
+combined_data_hs_clean$Ozone <- as.numeric(combined_data_hs_clean$Ozone)
+combined_data_hs_clean$PM25 <- as.numeric(combined_data_hs_clean$PM25)
+combined_data_hs_clean$N02 <- as.numeric(combined_data_hs_clean$N02)
+```
+
+```{r}
+combined_data_hs_clean <- na.omit(combined_data_hs_clean)
+```
+
+```{r}
+# Adding population to the data
 state_abbreviations <- data.frame(
   full_name = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
                 "Delaware", "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", 
@@ -360,15 +480,13 @@ state_abbreviations <- data.frame(
 ```
 
 ```{r}
-# Combining population and abbreviations
 population_data_abv <- population_data %>%
   left_join(state_abbreviations, by = c("NAME" = "full_name")) %>%
   mutate(STATE = coalesce(abbreviation, "Unknown")) # If abbreviation is missing, mark it as "Unknown"
 ```
 
 ```{r}
-# Adding population to the data
-combined_data_clean1 <- left_join(combined_data_clean, population_data_abv, by = "STATE") %>% 
+combined_data_clean1 <- left_join(combined_data_hs_clean, population_data_abv, by = "STATE") %>% 
   select(-c(NAME, abbreviation))
 
 total_hospitals <- hospital_data %>% 
@@ -376,18 +494,19 @@ total_hospitals <- hospital_data %>%
   summarise(total_hospitals = n()) %>%
   arrange(desc(total_hospitals))
 
-full_dataset<-left_join(combined_data_clean1, total_hospitals, by = "STATE")
+full_dataset<-left_join(combined_data_clean1, total_hospitals, by = "STATE") 
+
+full_dataset$POPESTIMATE2018 <- as.numeric(full_dataset$POPESTIMATE2018)
+full_dataset$total_hospitals.y <- as.numeric(full_dataset$total_hospitals.y)
 
 hospital_data_per_state <- full_dataset %>%
-  mutate(ppl_per_hos = POPESTIMATE2018/total_hospitals) %>% 
+  mutate(
+    ppl_per_hos = POPESTIMATE2018 / total_hospitals.y
+  ) %>% 
   select(STATE, ppl_per_hos) %>% 
   group_by(STATE) %>% 
-  summarize(ppl_per_hos = mean(ppl_per_hos)) %>% 
-  filter(STATE != "AS") %>% 
-  filter(STATE != "GU") %>% 
-  filter(STATE != "MP") %>% 
-  filter(STATE != "PW") %>% 
-  filter(STATE != "VI")
+  summarize(ppl_per_hos = mean(ppl_per_hos, na.rm = TRUE)) %>% 
+  filter(!STATE %in% c("AS", "GU", "MP", "PW", "VI"))
 ```
 
 # Data Viz
@@ -462,3 +581,95 @@ ggplot(diag_race, aes(x=patient_race, y=avg_diag_90))+
   labs(x="Patient Race", y="Average Diagnosed Under 90 Days", title = "Diagnosed Under 90 Days by Race")+
   theme_minimal()
 ```
+
+## Methodology
+
+# Preliminary Model
+
+```{r}
+diag_post3 <- stan_glm(
+ DiagPeriodL90D  ~ patient_race + patient_zip3 + patient_age + payer_type,
+  family = binomial,
+  prior_PD = FALSE,
+  data = patient_data,
+  chains = 4, iter = 5000*2, seed = 84735, refresh = 0)
+```
+
+```{r}
+pp_check(diag_post3)
+```
+
+```{r}
+mcmc_trace(diag_post3)
+```
+
+```{r}
+mcmc_acf(diag_post3)
+```
+
+```{r}
+classification_summary(diag_post3, patient_data, cutoff = 0.5)
+```
+
+# Laplace Model
+
+```{r, eval=FALSE}
+ridge_model_climb_hs <- stan_glm(DiagPeriodL90D ~.,
+                        data = combined_data_hs_clean,
+                        family = binomial,
+                        prior = laplace(autoscale = TRUE),
+                        chains = 4,iter = 2500 * 2, cores = 2)
+saveRDS(ridge_model_climb_hs,"~/Desktop/hs_model.rds")
+```
+
+```{r}
+hs_mod <- readRDS("hs_model.rds")
+```
+
+```{r}
+pp_check(hs_mod)
+```
+
+```{r}
+mcmc_trace(hs_mod, pars = "DivisionNew England", "income_individual_median")
+```
+
+```{r}
+mcmc_acf(hs_mod, pars = "DivisionNew England", "income_individual_median")
+```
+
+```{r}
+tidy(hs_mod, conf.int = 0.8, conf.level = 0.8)
+```
+
+```{r}
+# Make predictions (probability of success)
+predictions <- predict(hs_mod, newdata = as.data.frame(combined_data_hs_clean), type = "response")
+
+# Create ROC curve
+roc_curve <- roc(combined_data_hs_clean$DiagPeriodL90D, predictions)
+```
+
+```{r}
+i <- 25
+
+# Get sensitivity and specificity at the chosen cutoff point
+sensitivity <- roc_curve$sensitivities[i]
+specificity <- 1 - roc_curve$specificities[i]
+
+# Calculate accuracy
+accuracy <- (roc_curve$sensitivities[i] + (1 - roc_curve$specificities[i])) / 2
+
+# Print the results
+print(paste("Sensitivity:", sensitivity))
+print(paste("Specificity:", specificity))
+print(paste("Accuracy:", accuracy))
+```
+
+# Works Cited
+
+Aguayo, Carlos. “USA Hospitals.” Kaggle, 24 Mar. 2019, www.kaggle.com/datasets/carlosaguayo/usa-hospitals?resource=download.
+
+Farzonaeraj. “Equity in Healthcare: Eda: Baseline Model.” Kaggle, Kaggle, 18 Jan. 2024, www.kaggle.com/code/farzonaeraj/equity-in-healthcare-eda-baseline-model/notebook.
+
+“Prior Distributions and Options - Priors.” - Priors • Rstanarm, mc-stan.org/rstanarm/reference/priors.html. Accessed 22 Apr. 2024.
