@@ -1,0 +1,169 @@
+---
+title: "Bayes"
+output: html_document
+date: "2024-04-11"
+---
+
+```{r}
+library(bayesrules)
+library(pROC)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(usmap)
+library(sf)
+library(rnaturalearth)
+library(bayesplot)
+library(broom)
+library(broom.mixed)
+library(glmnet)
+library(rstan)
+library(rstanarm)
+library(plotly)
+library(usethis)
+```
+
+
+```{r}
+patient_data<-read.csv("/Users/mattu/Documents/Bayesian /Capstone/training.csv")
+hospital_data<- read.csv("/Users/mattu/Documents/Bayesian /Capstone/Hospitals.csv")
+population_data <- read.csv("/Users/mattu/Documents/Bayesian /Capstone/nst-est2019-alldata.csv")
+population_data <- population_data %>% 
+  select(NAME, POPESTIMATE2018) %>% 
+  filter(NAME != c("United States", "Northeast Region", "Midwest Region", "South Region", "West Region")) 
+```
+```{r}
+health_data %>% 
+  count(payer_type)
+```
+
+```{r}
+health_data_perc <- health_data %>%
+  filter(!is.na(DiagPeriodL90D), !is.na(payer_type)) %>%
+  group_by(DiagPeriodL90D, payer_type) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100) 
+
+health_data_perc %>% 
+ggplot(aes(x = as.factor(DiagPeriodL90D), y = percentage, fill = payer_type)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(aes(label = paste0(round(percentage), "%")), position = position_dodge(width = 0.7), vjust = -0.5) +
+  scale_fill_discrete(name = "Payer Type") +  
+  labs(x = "Diagnosis", y = "Percentage", title = "Percentage of Payer Types within Diagnosis") +
+  theme_minimal()
+```
+# Model 
+
+```{r}
+diag_post3 <- stan_glm(
+ DiagPeriodL90D  ~ patient_race + patient_zip3 + patient_age + payer_type,
+  family = binomial,
+  prior_PD = FALSE,
+  data = patient_data,
+  chains = 4, iter = 5000*2, seed = 84735, refresh = 0)
+```
+```{r}
+pp_check(diag_post3)
+```
+
+As shown by the pp_check, we see that our model follows the data closely and serves a good check that we are on the right track. 
+
+# MCMC Diagnostic Checks 
+
+```{r}
+mcmc_trace(diag_post3)
+```
+
+When we look at the traceplots for our various predictors we see random patterns which is what we want. There are no places where the chains get stuck or seem to follow a trend.
+
+```{r}
+mcmc_acf(diag_post3)
+```
+
+The autocorrelation plots tell us that for this model our chains drop down to no correlation quickly. This is a necessary assumption for our us to believe that the chains and sample are random. 
+
+# Error Metrics 
+
+```{r}
+classification_summary(diag_post3, patient_data, cutoff = 0.5)
+```
+
+Our model does really well in the sensitivity category with 99.8% which means we our true positives are very accurate. However, specificity is very low with almost zero, meaning that our model's ability to give a true negative is not good at all. Finally, our overall accuraccy definitely has room to improve but at 62% it is not terrible. Since we did not use cross-validated metrics for these, we would epxect our model to do worse in a new dataset and have these measures decrease. 
+
+# Analysis 
+
+- We began our analysis of the dataset through a simple Bayesian logistic model.
+- Before we did anything too complex, we thought it would be good to construct a model that, intuitively, made sense to us. 
+- For example, we asked ourselves the question what factors play the biggest role in a correct diagnosis of breast cancer? 
+- Then we decided to incorporate some predictors we thought could influence diagnosis from our prior knowledge, like race and type of insurance. 
+- Overall, our preliminary model helped inform us that our intuition for variables that affect diagnosis was on the right track.
+- It can serve as a check for when we construct a Bayesian model that penalizes insignificant variables, but we might think they proive necessary information. 
+
+```{r}
+# Make predictions (probability of success)
+predictions <- predict(diag_post3, newdata = as.data.frame(patient_data), type = "response")
+
+# Create ROC curve
+roc_curve <- roc(patient_data$DiagPeriodL90D, predictions)
+```
+
+```{r}
+i <- 25
+
+# Get sensitivity and specificity at the chosen cutoff point
+sensitivity <- roc_curve$sensitivities[i]
+specificity <- 1 - roc_curve$specificities[i]
+
+# Calculate accuracy
+accuracy <- (roc_curve$sensitivities[i] + (1 - roc_curve$specificities[i])) / 2
+
+# Print the results
+print(paste("Sensitivity:", sensitivity))
+print(paste("Specificity:", specificity))
+print(paste("Accuracy:", accuracy))
+```
+
+
+
+
+
+
+```{r}
+data(climbers_sub)
+climbers <- climbers_sub %>%
+  select(peak_name, height_metres, expedition_id, season,
+  			 member_id, success, age, expedition_role, oxygen_used)
+
+# Check it out
+head(climbers)
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+horseshoe(diagnosis, patient_race, method.tau = c("fixed", "truncatedCauchy", "halfCauchy"),
+  tau = 1, method.sigma = c("fixed", "Jeffreys"), Sigma2 = 1,
+  burn = 1000, nmc = 5000, thin = 1, alpha = 0.05)
+```
+
+
+```{r}
+ridge_model_hospitals_group <- readRDS("/Users/mattu/Documents/Bayesian /Capstone/ridge_model_hospitals_group.rds")
+
+pp_check(ridge_model_hospitals_group)
+```
+```{r}
+health_data2 <- health_data2 %>% 
+  select(-patient_gender)
+
+horse_p <- stan_glm(diagnosis~. ,
+                        data = health_data2,
+                        family = binomial,
+                        prior = hs(),
+                        chains = 4,iter = 500 * 2)
+```
+
