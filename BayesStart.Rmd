@@ -1,0 +1,155 @@
+---
+title: "Progress Report 1"
+author: "Lilith Appel, Jacob Posner, Mateo Useche"
+date: "2024-04-11"
+output: html_document
+---
+
+```{r}
+#Load packages
+library(bayesrules)
+library(pROC)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(usmap)
+library(sf)
+library(rnaturalearth)
+library(bayesplot)
+library(broom)
+library(broom.mixed)
+library(glmnet)
+library(rstan)
+library(rstanarm)
+library(plotly)
+library(usethis)
+```
+
+
+# Research Question
+
+Looking at patients who were diagnosed with breast cancer from 2015-2018, we want to study what parameters affected whether or not a breast cancer patient was diagnosed within 90 days of their first hospital visit. We also want to explore how accurate we can get with our predictions using a Bayesian lasso model. 
+
+# Data background
+
+We use a dataset from Health Verity (HV), which is a large healthcare-related ecosystem specifically for US data. The data were created by a Kaggle challenge where they joined multiple datasets including health predictors, demographics, socioeconomic status, and zip codes. In particular, this HV dataset has patient-level data for individuals who were diagnosed with metastatic triple-negative breast cancers. Additionally, the dataset was merged with environmental databases to include toxic air pollution and its effect on labor outcomes. 
+Moreover, we use a hospital dataset from all 50 US states and territories. We are hoping to eventually merge these two datasets so we can have all the demographic data and healthcare equity predictors and be able to analyze them with the spatial data from our second dataset. This data is geocoded and licensed by the US Government Works. 
+For our analysis, our outcome of interest is whether or not a patient got diagnosed with breast cancer within the first 90 days. For our predictors, we have a lot of different options and we pulled 83 variables that could be important predictors. To list a few, we are interested in whether or not a patient is insured, race, age, zip code, and particulate matter pollution. We plan on creating a model that looks at the “best” predictors to include those in the model. 
+
+
+# Data
+
+```{r}
+patient_data<-read.csv("training.csv")
+hospitals<- read.csv("Hospitals.csv")
+```
+
+# Model Building
+
+```{r}
+hospital_data_zip <- hospitals %>%
+  mutate(patient_zip3=substr(hospitals$ZIP, 1,3)) 
+hospital_data_zip$patient_zip3 <- strtoi(hospital_data_zip$patient_zip3)
+```
+
+```{r}
+combined_data <- left_join(patient_data, hospital_data_zip, by = "patient_zip3", relationship = "many-to-many")
+```
+
+
+```{r}
+combined_data_hs <- combined_data %>%
+  group_by(patient_id) %>%
+  mutate(total_hospitals = n()) %>%
+  distinct(patient_id, .keep_all = TRUE)
+```
+
+```{r}
+combined_data_hs_clean <- combined_data_hs %>%
+  select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+```
+
+
+```{r}
+combined_data_hs_clean$Ozone <- as.numeric(combined_data_hs_clean$Ozone)
+combined_data_hs_clean$PM25 <- as.numeric(combined_data_hs_clean$PM25)
+combined_data_hs_clean$N02 <- as.numeric(combined_data_hs_clean$N02)
+```
+
+```{r}
+combined_data_hs_clean <- na.omit(combined_data_hs_clean)
+```
+
+#Building a model with a laplace prior
+```{r,eval=FALSE}
+ridge_model_climb_hs <- stan_glm(DiagPeriodL90D ~.,
+                        data = combined_data_hs_clean,
+                        family = binomial,
+                        prior = laplace(autoscale = TRUE),
+                        chains = 4,iter = 2500 * 2, cores = 2)
+saveRDS(ridge_model_climb_hs,"~/Desktop/hs_model.rds")
+```
+
+Originally we wanted to use a lasso prior, in order for it to auto filter our data, but looking at the code book it required a normal likelihood, but our data is binomial. This means we had to use something else, and we decided on a laplace prior. Looking at a graph of a laplace prior, it assumes that most variables will be zero, and was able to push a lot of original 77 variables to zero, while keeping some important predictiors. 
+
+```{r}
+hs_mod <- readRDS("~/Desktop/hs_model.rds")
+```
+
+
+```{r}
+pp_check(hs_mod)
+```
+Using the pp_check we see that our possible models created by our model follow the data
+```{r}
+mcmc_trace(hs_mod, pars = "DivisionNew England", "income_individual_median")
+```
+We see that the trace plots are very stable for one of the predictors that was kept in by the model (Division New england), and one that was kicked out (income_indivudal_median)
+
+```{r}
+mcmc_acf(hs_mod, pars = "DivisionNew England", "income_individual_median")
+```
+We also see low autocorrection within our chains, as by around 3-4 steps they are no longer dependent
+
+
+```{r}
+tidy(hs_mod, conf.int = 0.8, conf.level = 0.8)
+```
+In this general this tidy plot, is a lot to look at but looking through we can see a large amount of estimates that have been sent to very small values, and many predictors credible interval cross zero
+
+```{r}
+
+```
+
+
+```{r}
+# Make predictions (probability of success)
+predictions <- predict(hs_mod, newdata = as.data.frame(combined_data_hs_clean), type = "response")
+
+# Create ROC curve
+roc_curve <- roc(combined_data_hs_clean$DiagPeriodL90D, predictions)
+```
+
+```{r}
+i <- 25
+
+# Get sensitivity and specificity at the chosen cutoff point
+sensitivity <- roc_curve$sensitivities[i]
+specificity <- 1 - roc_curve$specificities[i]
+
+# Calculate accuracy
+accuracy <- (roc_curve$sensitivities[i] + (1 - roc_curve$specificities[i])) / 2
+
+# Print the results
+print(paste("Sensitivity:", sensitivity))
+print(paste("Specificity:", specificity))
+print(paste("Accuracy:", accuracy))
+```
+
+We see that we have very high accuracy, sensitivity, and specificity, however we have not used any cross validation, which means that for an outside dataset our model would be expected to score lower in sensitivity, specificity, and accuracy ratings. 
+
+
+#Next Steps
+For our next steps we would want to dicuss and talk about the most important variables in our model, and think about why that might be in context. We also want to clean up our presentation to make it easier for a reader, and to come up with a possible solution to make greater equity for all patients.  
+
+
