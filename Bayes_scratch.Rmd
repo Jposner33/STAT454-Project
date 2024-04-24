@@ -1,0 +1,168 @@
+```{r}
+#Load packages
+library(bayesrules)
+library(pROC)
+library(tidyr)
+library(tidyverse)
+library(ggplot2)
+library(usmap)
+library(sf)
+library(rnaturalearth)
+library(bayesplot)
+library(broom)
+library(broom.mixed)
+library(glmnet)
+library(rstan)
+library(rstanarm)
+library(plotly)
+library(usethis)
+```
+
+```{r include = TRUE}
+# Set a more color blind friendly palette 
+palette("Okabe-Ito")
+scale_colour_discrete <- function(...) scale_colour_manual(values = palette())
+scale_fill_discrete   <- function(...) scale_fill_manual(values = palette())
+```
+
+```{r}
+# Load the data
+patient_data<-read.csv("Data/training.csv")
+hospital_data<- read.csv("Data/Hospitals.csv")
+population_data <- read.csv("Data/nst-est2019-alldata.csv")
+population_data <- population_data %>% 
+  select(NAME, POPESTIMATE2018) %>% 
+  filter(NAME != c("United States", "Northeast Region", "Midwest Region", "South Region", "West Region")) 
+```
+```{r}
+hospital_data_zip <- hospital_data %>%
+  mutate(patient_zip3=substr(hospital_data$ZIP, 1,3)) 
+hospital_data_zip$patient_zip3 <- strtoi(hospital_data_zip$patient_zip3)
+```
+
+```{r}
+combined_data <- left_join(hospital_data_zip, patient_data, by = "patient_zip3", relationship = "many-to-many")
+```
+
+```{r, eval=FALSE}
+length(unique(patient_data$patient_id))
+length(unique(combined_data$patient_id))
+```
+
+```{r}
+combined_data_hs <- combined_data %>%
+  group_by(patient_id) %>%
+  mutate(total_hospitals = n()) %>%
+  distinct(patient_id, .keep_all = TRUE)
+```
+
+```{r}
+combined_data_hs_clean <- combined_data_hs %>%
+  select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type))
+```
+
+```{r}
+combined_data_hs_clean$Ozone <- as.numeric(combined_data_hs_clean$Ozone)
+combined_data_hs_clean$PM25 <- as.numeric(combined_data_hs_clean$PM25)
+combined_data_hs_clean$N02 <- as.numeric(combined_data_hs_clean$N02)
+```
+
+```{r}
+combined_data_hs_clean <- na.omit(combined_data_hs_clean)
+```
+
+```{r}
+# Adding population to the data
+state_abbreviations <- data.frame(
+  full_name = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
+                "Delaware", "District of Columbia", "Florida", "Georgia", "Hawaii", "Idaho", "Illinois", 
+                "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts", 
+                "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", 
+                "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", 
+                "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "South Dakota", 
+                "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia", 
+                "Wisconsin", "Wyoming", "Puerto Rico"),
+  abbreviation = c("AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", 
+                   "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", 
+                   "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", 
+                   "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "PR")
+)
+```
+
+```{r}
+population_data_abv <- population_data %>%
+  left_join(state_abbreviations, by = c("NAME" = "full_name")) %>%
+  mutate(STATE = coalesce(abbreviation, "Unknown")) # If abbreviation is missing, mark it as "Unknown"
+```
+
+```{r}
+combined_data_clean1 <- left_join(combined_data_hs_clean, population_data_abv, by = "STATE") %>% 
+  select(-c(NAME, abbreviation))
+
+total_hospitals <- hospital_data %>% 
+  group_by(STATE) %>%
+  summarise(total_hospitals = n()) %>%
+  arrange(desc(total_hospitals))
+
+full_dataset<-left_join(combined_data_clean1, total_hospitals, by = "STATE") 
+
+full_dataset$POPESTIMATE2018 <- as.numeric(full_dataset$POPESTIMATE2018)
+full_dataset$total_hospitals.y <- as.numeric(full_dataset$total_hospitals.y)
+
+hospital_data_per_state <- full_dataset %>%
+  mutate(
+    ppl_per_hos = POPESTIMATE2018 / total_hospitals.y
+  ) %>% 
+  select(STATE, ppl_per_hos) %>% 
+  group_by(STATE) %>% 
+  summarize(ppl_per_hos = mean(ppl_per_hos, na.rm = TRUE)) %>% 
+  filter(!STATE %in% c("AS", "GU", "MP", "PW", "VI"))
+```
+
+
+
+
+```{r}
+full_dataset %>% 
+  mutate(
+    ppl_per_hos = POPESTIMATE2018 / total_hospitals.y) %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>%
+  group_by(STATE, ppl_per_hos) %>%
+  summarise(avg_diag_90 = mean(DiagPeriodL90D)) %>%
+  arrange(desc(avg_diag_90)) %>% 
+  ggplot()+
+  geom_text(aes(x=ppl_per_hos, y=avg_diag_90, label = STATE))+
+  labs(x= "People per Hospital", y="Average Diagnosis Within 90 Days", title = "Access to Hospitals per State by Average Diagnosis Within 90 Days")+
+  theme_minimal()
+```
+
+
+```{r}
+full_dataset %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>%
+  select(STATE, income_household_median, DiagPeriodL90D) %>% 
+  group_by(STATE) %>% 
+  summarize(median_household_income = mean(income_household_median), avg_diag_90 = mean(DiagPeriodL90D)) %>% 
+  ggplot()+
+  geom_text(aes(x=median_household_income, y=avg_diag_90, label = STATE))+
+  labs(x="Median Household Income", y="Average Diagnosis Within 90 Days", title = "Median Household Income per State by Average Diagnosis Within 90 Days")+
+  theme_bw()
+```
+
+```{r, fig.height=10}
+rename <- c("MEDICARE ADVANTAGE" = "MA", "COMMERCIAL" = "COM", "MEDICADE" = "MED")
+
+full_dataset %>%
+  filter(!is.na(payer_type) & payer_type != "") %>% 
+  filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>%
+  mutate(payer_type1 = rename[payer_type]) %>% 
+  group_by(payer_type1, STATE, payer_type) %>%
+  summarise(avg_90_diag = mean(DiagPeriodL90D)) %>% 
+  ggplot()+
+  geom_col(aes(x = payer_type1, y = avg_90_diag, fill = payer_type))+
+  facet_wrap(~STATE)+
+  theme(axis.text.x = element_blank())+
+  labs(y = "Average Diagnosis Within 90 Days", x = "Insurance Type", fill = "Insurance Type", title = "Average Diagnosis Within 90 Days by Type of Insurance per State")+
+  theme_minimal()
+```
+
