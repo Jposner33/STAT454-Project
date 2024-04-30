@@ -302,7 +302,7 @@ classification_summary(diag_post3, patient_data, cutoff = 0.5)
 -   For example, we asked ourselves the question what factors play the biggest role in a correct diagnosis of breast cancer?
 -   Then we decided to incorporate some predictors we thought could influence diagnosis from our prior knowledge, like race and type of insurance.
 -   Overall, our preliminary model helped inform us that our intuition for variables that affect diagnosis was on the right track.
--   It can serve as a check for when we construct a Bayesian model that penalizes insignificant variables, but we might think they proive necessary information.
+-   It can serve as a check for when we construct a Bayesian model that penalizes insignificant variables, but we might think they prove necessary information.
 
 # Laplace Model
 

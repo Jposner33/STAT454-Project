@@ -123,16 +123,20 @@ hospital_data_per_state <- full_dataset %>%
 
 
 ```{r}
-full_dataset %>% 
+full_dataset12<-full_dataset %>% 
+  count(STATE)
+
+left_join(full_dataset, full_dataset12, by = "STATE") %>% 
   mutate(
     ppl_per_hos = POPESTIMATE2018 / total_hospitals.y) %>% 
   filter(!is.na(DiagPeriodL90D) & DiagPeriodL90D != "") %>%
   group_by(STATE, ppl_per_hos) %>%
-  summarise(avg_diag_90 = mean(DiagPeriodL90D)) %>%
+  summarise(avg_diag_90 = mean(DiagPeriodL90D), num_cases = n()) %>%
   arrange(desc(avg_diag_90)) %>% 
   ggplot()+
-  geom_text(aes(x=ppl_per_hos, y=avg_diag_90, label = STATE))+
+  geom_text(aes(x=ppl_per_hos, y=avg_diag_90, label = STATE, color = num_cases))+
   labs(x= "People per Hospital", y="Average Diagnosis Within 90 Days", title = "Access to Hospitals per State by Average Diagnosis Within 90 Days")+
+  scale_color_continuous(name = "Number of Cases") +
   theme_minimal()
 ```
 
