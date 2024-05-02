@@ -654,3 +654,6 @@ For each increase in the labor force by 1% (which is defined as the percent resi
 Looking at the percent of residents who are veterans for each one percentage increase the odds likely of getting a diagonsis within 90 days was 0.9682995 as high.
 
 For each 1 percentage increase in the number of residents who report their race as Native Hawaiian and Other Pacific Islander the odds likely of getting a diagnosis within 90 days was 227.46 percent higher.
+
+
+##Final Conclusion 
