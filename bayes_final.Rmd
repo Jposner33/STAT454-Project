@@ -103,7 +103,7 @@ combined_data_hs <- combined_data %>%
 ```{r}
 combined_data_hs_clean <- combined_data_hs %>%
   ungroup() %>%
-  select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type,patient_id))
+  select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type,patient_id,bmi))
 ```
 
 ```{r}
@@ -402,6 +402,7 @@ patient_data_clean <- patient_data_clean %>%
 patient_data_clean <- na.omit(patient_data_clean)
 ```
 
+##Please do not run this model, and instead download "diag_post3.rds" from our github as this model takes ~30 minutes to run 
 ```{r,eval=FALSE}
 diag_post3 <- stan_glm(
  DiagPeriodL90D  ~ patient_race + patient_state + patient_age + payer_type,
@@ -416,7 +417,6 @@ saveRDS(diag_post3,"~/Desktop/diag_post3.rds")
 diag_post3 <- readRDS("~/Desktop/diag_post3.rds")
 ```
 
-
 ```{r}
 pp_check(diag_post3)
 ```
@@ -424,7 +424,6 @@ pp_check(diag_post3)
 ```{r}
 mcmc_trace(diag_post3, pars = vars(contains("patient_race")))
 mcmc_trace(diag_post3, pars = vars(contains("type")))
-
 ```
 
 When we look at the traceplots for our various predictors we see random patterns which is what we want. There are no places where the chains get stuck or seem to follow a trend.
@@ -432,8 +431,6 @@ When we look at the traceplots for our various predictors we see random patterns
 ```{r}
 mcmc_acf(diag_post3, pars = vars(contains("patient_race")))
 mcmc_acf(diag_post3, pars = vars(contains("type")))
-
-
 ```
 
 The autocorrelation plots tell us that for this model our chains drop down to no correlation quickly. This is a necessary assumption for our us to believe that the chains and sample are random.
@@ -481,20 +478,21 @@ These relationships are very complex and cannot be taken lightly; therefore, I w
 Initially, we aimed to employ a lasso model. However, this required our model's likelihood to be normal, which was incompatible with the binomial nature of our data, given that we are dealing with a binary outcome variable. Instead, we use a laplace prior, with mean mu zero, and lambda standard deviation. Which for the purposes of our model, assumes that most predictors will be zero, and the rest will be distributed around zero. In terms of picking lambda, the autoscale function in stan_glm takes care of it, this means that it will adjust the scales of the priors according to the dispersion in the variables.
 	
 This model takes in every variable and then tries to minimize the RSS (residual sum of squares), which it does by pushing some variables it deems unimportant to near zero. This is appropriate, as we wanted to use it to see what variables were important for predicting breast cancer diagnosis. It also has full power on the priors of our predictors, which means that we do not have control as users. This is appropriate as we have not researched previous studies on this topic and have no prior beliefs. 
-	
 
+In our specific case, this Laplace will try and predict diagonsis within 90 days by using every other predictor, and will push predictors it finds as "less important" to zero, to try and allow us to see what predictors are seen as impactful. 
+$$
 \begin{array}{lrll}
-\text{Data: } & Y_i | \beta_0, \beta_1,\beta_2,\beta_3,\beta_4 & \stackrel{ind}{\sim} \text{Bern}(\pi_i) & \text{where } \log\left(\frac{\pi_i}{1 - \pi_i}\right) = \beta_0 + \beta_1 X_i \\
-&&& \text{equivalently, } \frac{\pi_i}{1 - \pi_i} = e^{\beta_0 + \beta_1 X_i} \; \text{ and } \pi_i = \frac{e^{\beta_0 + \beta_1 X_i}}{e^{\beta_0 + \beta_1 X_i} + 1} \\
+\text{Data: } & Y_i | \beta_0, \beta_1 X_{1i},...\beta_{75}X_{75i} & \stackrel{ind}{\sim} \text{Bern}(\pi_i) & \text{where } \log\left(\frac{\pi_i}{1 - \pi_i}\right) = \beta_0 + \beta_1 X_i ... + \beta_{75}X_{75i} \\
+&&& \text{equivalently, } \frac{\pi_i}{1 - \pi_i} = e^{\beta_0 + \beta_1 X_i + \beta_{75}X_{75i}} \; \text{ and } \pi_i = \frac{e^{\beta_0 + \beta_1 X_i ... + \beta_{75} X_{75i}}}{e^{\beta_0 + \beta_1 X_i ... + \beta_{75} X_{75i}} + 1} \\
 &&& \\
 \text{Priors: } 
 & \beta_{0c} & \sim N(m_0, s_0^2) \\
-& \beta_1    & \sim N(m_1, s_1^2) \\
-& \beta_2    & \sim N(m_2, s_2^2) \\
-& \beta_3    & \sim N(m_3, s_3^2) \\
-& \beta_4    & \sim N(m_4, s_4^2) \\
-\end{array}
+& \beta_1    & \sim \text{Laplace}(m_1, s_1^2) \\
+& ... \\
+& \beta_{75} & \sim \text{Laplace}(m_{75}, s_{75}^2)\\
 
+\end{array}
+$$
 ### Laplace Analysis
 
 ```{r}
@@ -503,20 +501,13 @@ combined_data_hs_clean <- combined_data_hs %>%
   select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type,patient_id,bmi))
 ```
 
-
+These variables, are orignally characters in the dataset, but are numeric vairables
 ```{r}
 combined_data_hs_clean$Ozone <- as.numeric(combined_data_hs_clean$Ozone)
 combined_data_hs_clean$PM25 <- as.numeric(combined_data_hs_clean$PM25)
 combined_data_hs_clean$N02 <- as.numeric(combined_data_hs_clean$N02)
 ```
-
-```{r}
-combined_data_hs_clean_2 <- combined_data_hs %>%
-  select(-c(patient_race))
-```
-
-
-
+The dataset had blank values, which R is not treating equal to an NA
 ```{r}
 combined_data_hs_clean[combined_data_hs_clean == ""] <- NA
 ```
@@ -524,7 +515,7 @@ combined_data_hs_clean[combined_data_hs_clean == ""] <- NA
 ```{r}
 combined_data_hs_clean <- na.omit(combined_data_hs_clean)
 ```
-
+##Do not run code below, instead make sure to download "laplace_modelreal.rds" from our github to your machine, as this model takes 3+ hours to run!
 ```{r, eval=FALSE}
 laplace_model <- stan_glm(DiagPeriodL90D ~.,
                         data = combined_data_hs_clean,
@@ -554,10 +545,10 @@ pp_check(laplace_mod)
 mcmc_trace(laplace_mod, pars = "STATEMN", "income_individual_median")
 ```
 
--   We see that the trace plots are very stable for one of the predictors that was kept in by the model (Division New england), and one that was kicked out (income_indivudal_median)
+-   We see that the trace plots are very stable for one of the predictors that was kept in by the model (State Minnesota), and one that was kicked out (income_indivudal_median)
 
 ```{r}
-mcmc_acf(laplace_mod, pars = "DivisionNew England", "income_individual_median")
+mcmc_acf(laplace_mod, pars = "STATEMN", "income_individual_median")
 ```
 
 -   We also see low autocorrection within our chains, as by around 3-4 steps they are no longer dependent
