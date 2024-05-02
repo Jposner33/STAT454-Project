@@ -413,6 +413,7 @@ diag_post3 <- stan_glm(
 
 saveRDS(diag_post3,"~/Desktop/diag_post3.rds")
 ```
+
 ```{r}
 diag_post3 <- readRDS("~/Desktop/diag_post3.rds")
 ```
@@ -516,6 +517,7 @@ combined_data_hs_clean[combined_data_hs_clean == ""] <- NA
 combined_data_hs_clean <- na.omit(combined_data_hs_clean)
 ```
 ##Do not run code below, instead make sure to download "laplace_modelreal.rds" from our github to your machine, as this model takes 3+ hours to run!
+
 ```{r, eval=FALSE}
 laplace_model <- stan_glm(DiagPeriodL90D ~.,
                         data = combined_data_hs_clean,
@@ -584,27 +586,30 @@ tidy_mapdata <- combined_data_hs_clean %>%
 tidy_mapdata %>%
   arrange(desc(total))
 ```
+
 ```{r}
-tidy_mapdata2 <- tidyLaPlace_meaningful %>%
-  mutate(state = substring(term, first = 6)) %>%
-  filter(state == "CO" | state == "DC" | state =="RI" | state == "NV" | state == "MN"| state =="IA" | state == "MO" | state == "VT" | state =="DE")
+patients_in_data <- combined_data_hs_clean %>% 
+  mutate(state = STATE) %>%
+  group_by(state) %>%
+  summarise(total = n())
+mean(patients_in_data$total)
+median(patients_in_data$total)
 ```
 
 ```{r}
-MapOfTidyStates <- plot_usmap(data = tidy_mapdata2, values = "odds", region = "state") + 
+MapOfTidyStates <- plot_usmap(data = patients_in_data, values = "total", region = "state") + 
   labs(title = "States whose credible interval don't cross zero",
        subtitle = "Odds decrease/increase of diagonsis from red to pink") + 
-  scale_fill_continuous(low = "red",high = "pink", name = "Odds change") +
+  scale_fill_continuous(low = "red",high = "white", name = "Number of cases") +
   theme_minimal()
 
 MapOfTidyStates
 ```
+Looking at our table and map we see that a few states had the majority of cases, with a mean of 113 patients per state but a median of 42, not counting 4 states with zero cases. A majoirty of our "significant states" had very few patients, and we shouldn't generalize these results, to the whole population of that state. Only MN and CO are above the median amount of patients per state in the model, and only CO is above the mean.
 
-Looking at our table, and map we see that a few of our small states on the east coast (Dc,Ri,De) all have less than 30 cases. Vt the next state with the most cases has 53. The rest have at least 60 with MN and CO having over 300 cases. We see a small belt in the midwest, a collection of states near the rockies, and some east coast states but not super strong geographical trends. 
+For patients living in MN as compared to AL is  8.975619 times more odds likely to get their diagonsis back within 90 days. 
 
-However, for patients living in MN as compared to AL is  8.975619 times more odds likely to get their diagonsis back within 90 days. 
-
-Id has the strongest effect of any states, as a patient living in ID as comapred to AL is 4.648387e+32	more odds likely to get their diagonsis back within 90 days, and even though Idaho has almost 100 cases, this still is most likely an outlier. Looking at "America's Health ranking" 62.9% of Woman between 40-74 in Idaho received a screening. Ranking it 48th of all 50 us states, and this could mean that only patients who think they have breast cancer get screened, along with less overall patients leading to faster return time of diagonsis. 
+Id has the strongest effect of any states, as a patient living in ID as comapred to AL is 4.648387e+32	more odds likely to get their diagonsis back within 90 days, yet only had 4 cases
 
 ```{r}
 combined_data_hs_clean %>% 
@@ -615,31 +620,16 @@ combined_data_hs_clean %>%
 
 ```{r}
 set.seed(43576)
-classification_summary(laplace_mod, combined_data_hs_clean, cutoff = 0.56)
+classification_summary(laplace_mod, combined_data_hs_clean, cutoff = 0.54)
 ```
 -   We notice an accuracy of 61% which is almost exactly the same as the simple Bayesian model we ran showing little difference between the two 
 -Sensitivity 
-    -   Did not use any cross validation, therefore for an outside dataset, our model would be expected to score lower in sensitivity, specificity, and accuracy ratings
+-   Did not use any cross validation, therefore for an outside dataset, our model would be expected to score lower in sensitivity, specificity, and accuracy ratings
 -Overall we see certain states appear as meaninful vairbales, along with division NewEngland for geographical variables
 -We see some patient specific variables such as Hispanic, age, and commercial insurance or not 
 -We also see a few zipcode specific variables such as total hospitals, ozone, veterans, labor force, and density.
 -We had 3 states that showed up in our final model Wisconsin, Illonsis, and Wyoming.
-```{r}
-state_case_count_model <- rename(combined_data_hs_clean, state = STATE) %>%
-  group_by(state) %>%
-  filter(DiagPeriodL90D != "n/a") %>%
-  summarise(total = n()) 
-  state_case_count_model %>%
-    filter(state == "CO" | state == "DC" | state =="RI" | state == "NV" | state == "MN"| state =="IA" | state == "MO" | state == "VT" | state =="DE" | state == "ID")  %>%
-    arrange(desc(total))
-```
-Both Wisconsin and Il had a negative correlation with a diagonsis within 90 days, while Wyoming had a positive correlation. However, Wyoming had only 1 cases, which is not enough for us to draw any trends 
-
-Wisconsin had over 14 cases, and Il had 216 cases which makes us a little questionable about Wisconsin 
-
-Wisconsin had an odds of 0.214, meaning that being from Wisconsin reduced your chance of getting a positive diagnosis within 90 days was 21.4% as high as someone from the average state, which is significanctly worse 
-
-Il had an odds of 0.3195914 menaing that the average patient versus that same patient who lived in Il chance of getting a positive diagonsis within 90 days was 31.9% as high. 
+ange(desc(total))
 
 ```{r}
 state_division <- (combined_data_hs_clean) %>%
@@ -649,8 +639,10 @@ state_division <- (combined_data_hs_clean) %>%
   state_division %>%
     filter(Division == "New England")
 ```
-Seeing as we have one case from New England this is also not nearly enough cases for us to explore the relation.
+Seeing as we have only two case from New England this is also not nearly enough cases for us to explore the relation.
 
 Moving onto patient specific data each increase in age by one year increased someone's chance of a positive diagnosis the odds are 1.005 higher. 
 
-Having a commerical type of insurance 
+Having MEDICARE ADVANTAGE type of insurance odds of getting a diagonsis within 90 days is 0.8569726 as high as someone with commerical insurance 
+
+Looking at zipcode specific variables 
