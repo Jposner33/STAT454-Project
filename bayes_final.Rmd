@@ -570,12 +570,14 @@ tidyLaPlace_meaningful <-tidyLaPlace_meaningful %>%
   arrange(estimate) 
 tidyLaPlace_meaningful
 ```
--We see here that 18 variables whose 80% credible intervals do not cross zero. We see 13 geographical predictors 11 states, and one division. One of these states Nevada is associated with a decrease chance of getting a diagonsis within 90 days, while Co,Ri,Dc,Ia, MO,Vt,Ne,De,Mn, and ID are all associated with a higher chance of getting a diagonsis within 90 days 
+-We see here that 18 variables whose 80% credible intervals do not cross zero. We see 12 high-level geographical predictors: 11 states, and one division. One of these states Nevada is associated with a decrease chance of getting a diagonsis within 90 days, while Co,Ri,Dc,Ia, MO,Vt,Ne,De,Mn, and ID are all associated with a higher chance of getting a diagonsis within 90 days 
 
 We see two variables related to a person, being patient_age and payer type medicare For each one year increase in age. that person is 1.011999 times as likely to get a diagnosis within 90 days. This magtinude is very small but indicate that hospitals may try and diagnosis older patients much.  Having medicare advantage as compared to our baseline of commercial insurance makes your chance of being diagonsis within 90 days 85.7% as high. 
 
 We then see 4 zipcode level predictors: age_median, labor_force_participation, veteran, and race_pacific in which age_median, labor_force and veteran
 
+
+###First digging into our high-level geopgraphical predictors
 ```{r}
 tidy_mapdata <- combined_data_hs_clean %>% 
   mutate(state = STATE) %>%
@@ -598,8 +600,8 @@ median(patients_in_data$total)
 
 ```{r}
 MapOfTidyStates <- plot_usmap(data = patients_in_data, values = "total", region = "state") + 
-  labs(title = "States whose credible interval don't cross zero",
-       subtitle = "Odds decrease/increase of diagonsis from red to pink") + 
+  labs(title = "Number of patients in each state",
+       subtitle = "Red being low number of cases, white highest, and grey no cases.") + 
   scale_fill_continuous(low = "red",high = "white", name = "Number of cases") +
   theme_minimal()
 
@@ -645,4 +647,10 @@ Moving onto patient specific data each increase in age by one year increased som
 
 Having MEDICARE ADVANTAGE type of insurance odds of getting a diagonsis within 90 days is 0.8569726 as high as someone with commerical insurance 
 
-Looking at zipcode specific variables 
+Looking at zipcode specific variables for each increase in the year in age median of a zipcode the odds likely of getting a diagnosis within 90 days was 0.8970481 as high 
+
+For each increase in the labor force by 1% (which is defined as the percent residents 16 or older in the workforce) the odds likely of getting a diagnosis with 90 was 0.9441394 as high
+
+Looking at the percent of residents who are veterans for each one percentage increase the odds likely of getting a diagonsis within 90 days was 0.9682995 as high.
+
+For each 1 percentage increase in the number of residents who report their race as Native Hawaiian and Other Pacific Islander the odds likely of getting a diagnosis within 90 days was 227.46 percent higher.
