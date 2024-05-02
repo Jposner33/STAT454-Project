@@ -478,11 +478,11 @@ We began our analysis of the dataset through a simple Bayesian logistic model. B
 
 ## Laplace Model
 
-Initially, we aimed to employ a lasso model. However, this required our model's likelihood to be normal, which was incompatible with the binomial nature of our data, given that we are dealing with a binary outcome variable. Instead, we use a Laplace prior, with mean mu zero, and lambda standard deviation. Which for the purposes of our model, assumes that most predictors will be zero, and the rest will be distributed around zero. In terms of picking lambda, the autoscale function in stan_glm takes care of it, this means that it will adjust the scales of the priors according to the dispersion in the variables.
+Initially, we aimed to employ a lasso model. However, this required our model's likelihood to be normal, which was incompatible with the binomial nature of our data, given that we are dealing with a binary outcome variable. Instead, we use a laplace prior, with mean mu zero, and lambda standard deviation. Which for the purposes of our model, assumes that most predictors will be zero, and the rest will be distributed around zero. In terms of picking lambda, the autoscale function in stan_glm takes care of it, this means that it will adjust the scales of the priors according to the dispersion in the variables.
 	
 This model takes in every variable and then tries to minimize the RSS (residual sum of squares), which it does by pushing some variables it deems unimportant to near zero. This is appropriate, as we wanted to use it to see what variables were important for predicting breast cancer diagnosis. It also has full power on the priors of our predictors, which means that we do not have control as users. This is appropriate as we have not researched previous studies on this topic and have no prior beliefs. 
 
-In our specific case, this Laplace will try and predict diagnosis within 90 days by using every other predictor and will push predictors it finds as "less important" to zero, to try and allow us to see what predictors are seen as impactful. 
+In our specific case, this Laplace will try and predict diagonsis within 90 days by using every other predictor, and will push predictors it finds as "less important" to zero, to try and allow us to see what predictors are seen as impactful. 
 
 \begin{array}{lrll}
 \text{Data: } & Y_i | \beta_0, \beta_1 X_{1i},...\beta_{75}X_{75i} & \stackrel{ind}{\sim} \text{Bern}(\pi_i) & \text{where } \log\left(\frac{\pi_i}{1 - \pi_i}\right) = \beta_0 + \beta_1 X_i ... + \beta_{75}X_{75i} \\
@@ -504,16 +504,13 @@ combined_data_hs_clean <- combined_data_hs %>%
   select(-c(X,Y,OBJECTID,ID,NAME,ADDRESS,CITY,ZIP,ZIP4,TELEPHONE,TYPE,STATUS,TRAUMA,POPULATION,COUNTY,COUNTRY,COUNTYFIPS,LATITUDE,LONGITUDE,NAICS_CODE,NAICS_DESC,SOURCE,SOURCEDATE,VAL_METHOD,VAL_DATE,WEBSITE,STATE_ID,ALT_NAME,ST_FIPS,OWNER,TTL_STAFF,BEDS,TRAUMA,HELIPAD,patient_state,patient_zip3,patient_gender,breast_cancer_diagnosis_code,breast_cancer_diagnosis_desc,metastatic_cancer_diagnosis_code,metastatic_first_novel_treatment,metastatic_first_novel_treatment_type,patient_id,bmi))
 ```
 
-These variables, are originally characters in the dataset but are numeric variables.
-
+These variables, are orignally characters in the dataset, but are numeric vairables
 ```{r}
 combined_data_hs_clean$Ozone <- as.numeric(combined_data_hs_clean$Ozone)
 combined_data_hs_clean$PM25 <- as.numeric(combined_data_hs_clean$PM25)
 combined_data_hs_clean$N02 <- as.numeric(combined_data_hs_clean$N02)
 ```
-
-The dataset had blank values, which R is not treating equal to an NA.
-
+The dataset had blank values, which R is not treating equal to an NA
 ```{r}
 combined_data_hs_clean[combined_data_hs_clean == ""] <- NA
 ```
@@ -521,9 +518,10 @@ combined_data_hs_clean[combined_data_hs_clean == ""] <- NA
 ```{r}
 combined_data_hs_clean <- na.omit(combined_data_hs_clean)
 ```
-##Do not run the code below, instead make sure to download "laplace_modelreal.rds" from our Git Hub to your machine, as this model takes 3+ hours to run!
 
 ```{r, eval=FALSE}
+#Do not run code below, instead make sure to download "laplace_modelreal.rds" from our github to your machine, as this model takes 3+ hours to run!
+
 laplace_model <- stan_glm(DiagPeriodL90D ~.,
                         data = combined_data_hs_clean,
                         family = binomial,
@@ -532,37 +530,39 @@ laplace_model <- stan_glm(DiagPeriodL90D ~.,
 saveRDS(laplace_model,"~/Desktop/laplace_modelreal.rds")
 ```
 
-We originally wanted to use a lasso prior to auto-filtering our data. After analysis, we noticed it required a normal likelihood, but our data is binomial. We then switched to a Laplace prior, which assumes variables will be zero. We pushed a lot of the original 75 variables to zero while keeping some important predictors. 
+-   We originally wanted to use a lasso prior to auto filter our data
+    -   After analysis, we noticed it required a normal likelihood, but our data is binomial
+-   Switched to a laplace prior
+    -   Assumes variables will be zero,
+    -   Pushed a lot of the original 75 variables to zero while keeping some important predictors
 
 ```{r}
-laplace_mod <- readRDS("laplace_modelreal.rds")
+laplace_mod <- readRDS("~/Desktop/laplace_modelreal.rds")
 ```
 
 ```{r}
 pp_check(laplace_mod)
 ```
 
-Using the pp_check, we see that our possible models created by our model follow the data.
+-   Using the pp_check we see that our possible models created by our model follow the data
 
 ```{r}
 mcmc_trace(laplace_mod, pars = "STATEMN", "income_individual_median")
 ```
 
-We see that the trace plots are very stable for one of the predictors that were kept in by the model (State Minnesota) and one that was kicked out (income_indivudal_median).
+-   We see that the trace plots are very stable for one of the predictors that was kept in by the model (State Minnesota), and one that was kicked out (income_indivudal_median)
 
 ```{r}
 mcmc_acf(laplace_mod, pars = "STATEMN", "income_individual_median")
 ```
 
-We also see low autocorrection within our chains, as by around 3-4 steps they are no longer dependent.
+-   We also see low auto correction within our chains, as by around 3-4 steps they are no longer dependent
 
 ```{r}
 tidyLaPlace <- tidy(laplace_mod, conf.int = 0.80, conf.level = 0.80)
 (tidyLaPlace)
 ```
-
-In general, this tidy plot is a lot to look at but looking through we can see a large amount of estimates that have been sent to very small values, and many predictors credible interval cross zero The intercept represents someone from AL, Asian, Midwest, on commercial insurance.
-
+In this general this tidy plot, is a lot to look at but looking through we can see a large amount of estimates that have been sent to very small values, and many predictors credible interval cross zero Intercept is someone from AL, asian, midwest, on commericalinsurance 
 ```{r}
 tidyLaPlace_meaningful <- tidyLaPlace %>%
   filter(!(conf.low < 0 & conf.high > 0))
@@ -573,16 +573,16 @@ tidyLaPlace_meaningful <-tidyLaPlace_meaningful %>%
   arrange(estimate) 
 tidyLaPlace_meaningful
 ```
+-We see here that 18 variables whose 80% credible intervals do not cross zero. We see 12 high-level geographical predictors: 11 states, and one division. 
 
-We see here that 18 variables whose 80% credible intervals do not cross zero. We see 12 high-level geographical predictors: 11 states, and one division. One of these states Nevada is associated with a decreased chance of getting a diagnosis within 90 days, while Co, Ri, Dc, Ia, MO, Vt, Ne, De, Mn, and ID are all associated with a higher chance of getting a diagnosis within 90 days. 
+We see two variables related to a person, being patient_age and payer type medicare For each one year increase in age. that person is 1.011999 times as likely to get a diagnosis within 90 days. This magtinude is very small but indicate that hospitals may try and diagnosis older patients much.  Having medicare advantage as compared to our baseline of commercial insurance makes your chance of being diagonsis within 90 days 85.7% as high. 
 
-We see two variables related to a person, being patient and payer type Medicare For each one-year increase in age. that person is 1.011999 times as likely to get a diagnosis within 90 days. This magnitude is minimal but indicates that hospitals may diagnose older patients much. Having Medicare Advantage compared to our commercial insurance baseline makes your chance of being diagnosed within 90 days 85.7% as high. 
-
-We then see 4 zip code level predictors: age_median, labor_force_participation, veteran, and race_pacific in which age_median, labor_force and veteran.
+We then see 4 zipcode level predictors: age_median, labor_force_participation, veteran, and race_pacific in which age_median, labor_force and veteran
 
 
-### First digging into our high-level geographical predictors
+### First digging into our high-level geopgraphical predictors
 
+One of these states Nevada is associated with a decrease chance of getting a diagonsis within 90 days, while Co,Ri,Dc,Ia, MO,Vt,Ne,De,Mn, and ID are all associated with a higher chance of getting a diagonsis holding division, person-related variables, and zip code related variables together. 
 ```{r}
 tidy_mapdata <- combined_data_hs_clean %>% 
   mutate(state = STATE) %>%
@@ -612,27 +612,22 @@ MapOfTidyStates <- plot_usmap(data = patients_in_data, values = "total", region 
 
 MapOfTidyStates
 ```
-
 Looking at our table and map we see that a few states had the majority of cases, with a mean of 113 patients per state but a median of 42, not counting 4 states with zero cases. A majority of our "significant states" had very few patients, and we shouldn't generalize these results, to the whole population of that state. Only MN and CO are above the median amount of patients per state in the model, and only CO is above the mean.
 
-Patients living in MN as compared to AL are 8.975619 times more odds likely to get their diagnosis back within 90 days. 
+Starting with our state with the highest amount of patients, a patient living in CO as compared to AL is 3.92 times more odds likely to get their diagnosis back within 90 days, holding all other high-level geographical, patient, and zip-code predictors constant. For patients living in MN as compared to AL. is  8.975619 times more odds likely to get their diagnosis back within 90 days, holding all other high-level geographical, patient, and zip-code predictors constant. A patient in our state with the third most cases MO is 6.1 times more odds likely to get their diagnosis back within 90 days, as compared to someone from AL,  holding all other high-level geographical, patient, and zip-code predictors constant. 
 
-ID has the strongest effect of any state, as a patient living in ID compared to AL is 4.648387e+32	more odds likely to get their diagnosis back within 90 days, yet only had 4 cases.
+ID has the strongest effect of any states, as a patient living in ID as compared to AL is 4.648387e+32	more odds likely to get their diagnosis back within 90 days, holding all other high-level geographical, patient, and zip-code predictors constant, yet only had 3 patients. 
 
+NV, the only state that had a negative correlation meant that a patient's chance of receiving a diagnosis within 90 days as compared to AL was 0.2876052 as high, holding all other high-level geographical, patient, and zip-code predictors constant. 
+
+All other states had a positive correlation to getting a diagnosis back within 90 days, and less cases then CO,MN,and MO, holding all other high-level geographical, patient, and zip-code predictors constant. 
 ```{r}
 combined_data_hs_clean %>% 
        filter(STATE == "ID") %>%
        group_by(DiagPeriodL90D) %>%
        summarise(total=n())
 ```
-
-```{r}
-set.seed(43576)
-classification_summary(laplace_mod, combined_data_hs_clean, cutoff = 0.54)
-```
-
-We notice an accuracy of 61% which is almost exactly the same as the simple Bayesian model we ran showing little difference between the two. We did not use any cross-validation, therefore for an outside dataset, our model would be expected to score lower in sensitivity, specificity, and accuracy ratings. Overall we see certain states appear as meaningful variables, along with division New England for geographical variables. We see some patient-specific variables such as Hispanic, age, and commercial insurance or not. We also see a few zip code-specific variables such as total hospitals, ozone, veterans, labor force, and density. We had 3 states that showed up in our final model Wisconsin, Illinois, and Wyoming.
-
+ 
 ```{r}
 state_division <- (combined_data_hs_clean) %>%
   group_by(Division) %>%
@@ -641,9 +636,26 @@ state_division <- (combined_data_hs_clean) %>%
   state_division %>%
     filter(Division == "New England")
 ```
+Seeing as we have only two case from New England this is also not nearly enough cases for us to explore the relation.
 
-Seeing as we have only two cases from New England this is also not nearly enough cases for us to explore the relation. Moving onto patient-specific data each increase in age by one year increased someone's chance of a positive diagnosis the odds are 1.005 higher. Having MEDICARE ADVANTAGE type of insurance odds of getting a diagnosis within 90 days is 0.8569726 as high as someone with commercial insurance. Looking at zip code-specific variables for each increase in the year in age median of a zip code the odds likely of getting a diagnosis within 90 days was 0.8970481 as high. For each increase in the labor force by 1% (which is defined as the percent residents 16 or older in the workforce) the odds likely of getting a diagnosis with 90 was 0.9441394 as high. Looking at the percentage of residents who are veterans for each percent increase, the odds of getting a diagnosis within 90 days was 0.9682995 as high. For each 1 percentage increase in the number of residents who report their race as Native Hawaiian and Other Pacific Islander the odds likely of getting a diagnosis within 90 days was 227.46 percent higher.
+### Patient specific variables
 
+Moving onto patient specific data each increase in age by one year increased someone's chance of a positive diagnosis the odds are 1.005 higher,holding all other high-level geographical, patient, and zip-code predictors constant. Having MEDICARE ADVANTAGE type of insurance odds of getting a diagnosis within 90 days is 0.8569726 as high as someone with commercial insurance holding all other high-level geographical, patient, and zip-code predictors constant. 
+
+### Zip code specific
+
+Looking at zip code specific variables for each increase in the year in age median of a zip code the odds likely of getting a diagnosis within 90 days was 0.8970481 as high,holding all other high-level geographical, patient, and zip-code predictors constant. For each increase in the labor force by 1% (which is defined as the percent residents 16 or older in the workforce) the odds likely of getting a diagnosis with 90 was 0.9441394 as high,holding all other high-level geographical, patient, and zip-code predictors constant. The percent of residents who are veterans for each one percentage increase the odds likely of getting a diagnosis within 90 days was 0.9682995 as high, holding all other high-level geographical, patient, and zip-code predictors constant. Finally, for each 1 percentage increase in the number of residents who report their race as Native Hawaiian and Other Pacific Islander the odds likely of getting a diagnosis within 90 days was 227.46 percent higher,holding all other high-level geographical, patient, and zip-code predictors constant.
+
+### Error metrics
+```{r}
+set.seed(43576)
+classification_summary(laplace_mod, combined_data_hs_clean, cutoff = 0.54)
+```
+We notice an accuracy of 63.2% which similar Bayesian model we ran showing little difference between the two This model had a sensitivity of 89.6% which means that this model can correctly predict a patient who did get a diagnosis within 90 days 89.6% of the time. However, it had a really poor specificity of 18.7% which means it had a hard time predicting patients who did not receive a diagnosis within 90 days and not getting one within 90 days. 
+
+We Did not use any cross validation, therefore for an outside data set, our model would be expected to preform lower in sensitivity, specificity, and accuracy ratings, we didn't use it in order to save time.
+
+This model, is still better to use as it had an increase in sensitivity, specificity, and total accuracy over our parliamentary model, it also shows what variables seem to be impact. 
 
 ## Final Conclusion 
 
@@ -654,3 +666,9 @@ One weakness of our data is being stuck with only one option for gender in our d
 Another limitation is that we are only given a binary yes/no on receiving a diagnosis instead of how many days from the initial visit which could show better trends. Therefore, expanding the complexity of our dependent variable allows us to observe a more dynamic effect of our predictors, potentially uncovering more granular-level distinctions, such as variations in the time taken to receive a diagnosis.
 
 To improve this analysis, someone might include cross-validation when analyzing our models. We could also find a way to predict “NA” values or cases outside of our data set. 
+
+In our case it seems that patients living in different states may not have equitable access, for example a patient living in Nevada odds of getting a diagnosis back was 0.2876052 as high as someone in Alabama  for a patient of similar personal and zip-code demographics, another patient living in Minnesota is 8.975619 times more odds likely to get their diagnosis back within 90 days as that patient from Alabama show inequity between states. 
+
+Insurance plays a big factor in many people lives and in our model, someone on Medicare Advantage odds of getting a diagnosis within 90 days is 0.8569726 as high as someone with commercial insurance.
+
+
